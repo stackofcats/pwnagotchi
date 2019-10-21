@@ -38,8 +38,8 @@ class BTNap:
     IFACE_ADAPTER = 'org.bluez.Adapter1'
     IFACE_PROPS = 'org.freedesktop.DBus.Properties'
 
-    def __init__(self, mac):
-        self._mac = mac
+    def __init__(self, macs):
+        self._macs = macs
 
 
     @staticmethod
@@ -164,8 +164,11 @@ class BTNap:
             return False
 
         try:
-            dev_remote = BTNap.find_device(self._mac, bt_dev)
-            return bool(BTNap.prop_get(dev_remote, 'Connected'))
+            for mac in self._macs:
+                dev_remote = BTNap.find_device(mac, bt_dev)
+                if bool(BTNap.prop_get(dev_remote, 'Connected')):
+                    return True
+            return False
         except BTError:
             pass
         return False
@@ -181,8 +184,11 @@ class BTNap:
             return False
 
         try:
-            dev_remote = BTNap.find_device(self._mac, bt_dev)
-            return bool(BTNap.prop_get(dev_remote, 'Paired'))
+            for mac in self._macs:
+                dev_remote = BTNap.find_device(mac, bt_dev)
+                if bool(BTNap.prop_get(dev_remote, 'Paired')):
+                    return True
+            return False
         except BTError:
             pass
         return False
@@ -207,18 +213,26 @@ class BTNap:
 
         dev_remote = None
 
-        # could be set to 0, so check if > -1
-        while timeout > -1:
-            try:
-                dev_remote = BTNap.find_device(self._mac, bt_dev)
-                logging.debug('Using remote device (addr: %s): %s',
-                    BTNap.prop_get(dev_remote, 'Address'), dev_remote.object_path )
-                break
-            except BTError:
-                pass
+        for mac in self._macs:
+            # could be set to 0, so check if > -1
+            dev_timeout = timeout
+            while dev_timeout > -1:
+                success = False
+                try:
+                    logging.debug("Searching for device %s" % mac)
+                    dev_remote = BTNap.find_device(mac, bt_dev)
+                    logging.debug('Using remote device (addr: %s): %s',
+                        BTNap.prop_get(dev_remote, 'Address'), dev_remote.object_path )
+                    success = True
+                    break
+                except BTError:
+                    pass
 
-            time.sleep(1)
-            timeout -= 1
+                time.sleep(1)
+                dev_timeout -= 1
+
+            if success:
+                break
 
         try:
             bt_dev.StopDiscovery()
@@ -244,7 +258,7 @@ class BTNap:
 
         try:
             dev_remote.Pair()
-            logging.info('BT-TETHER: Successful paired with device ;)')
+            logging.info('BT-TETHER: Successful paired with device %s' % dev_remote.object_path)
             time.sleep(10) # wait for bnep0
         except Exception:
             # can fail because of AlreadyExists etc.
@@ -414,7 +428,7 @@ def on_loaded():
     global READY
     global INTERVAL
 
-    for opt in ['share_internet', 'mac', 'ip', 'netmask', 'interval']:
+    for opt in ['share_internet', 'macs', 'ip', 'netmask', 'interval']:
         if opt not in OPTIONS or (opt in OPTIONS and OPTIONS[opt] is None):
             logging.error("BT-TET: Pleace specify the %s in your config.yml.", opt)
             return
@@ -442,14 +456,14 @@ def on_ui_update(ui):
 
         INTERVAL.update()
 
-        bt = BTNap(OPTIONS['mac'])
+        bt = BTNap(OPTIONS['macs'])
 
         logging.debug('BT-TETHER: Check if already connected and paired')
         if bt.is_connected() and bt.is_paired():
             logging.debug('BT-TETHER: Already connected and paired')
             ui.set('bluetooth', 'CON')
         else:
-            logging.debug('BT-TETHER: Try to connect to mac')
+            logging.debug(('BT-TETHER: Try to connect to %s' % OPTIONS['macs']))
             if bt.connect():
                 logging.info('BT-TETHER: Successfuly connected')
             else:
